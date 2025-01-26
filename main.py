@@ -180,12 +180,14 @@ async def register_birthday(message: types.Message, state: FSMContext):
     ]
     keyboard = ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
-    await message.answer("Выберите действие:", reply_markup=keyboard)
+    print('test')
     await state.clear()
+    await message.answer("Выберите действие:", reply_markup=keyboard)
 
 
 @router.message(lambda message: message.text == "🎉 Все праздники")
 async def handle_settings(message: types.Message, state: FSMContext):
+    await message.answer("test message in all holidays")
     user_data = await state.get_data()
     user_lang = user_data.get('language', 'ru')
 
