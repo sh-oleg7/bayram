@@ -9,6 +9,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import KeyboardButton, ReplyKeyboardMarkup, Message, ReplyKeyboardRemove
 
+from database import create_user, create
+from database import create_new_record
+
+
+
 # Включаем логирование, чтобы не пропустить важные сообщения
 logging.basicConfig(level=logging.INFO)
 
@@ -83,6 +88,7 @@ holidays_by_month = {
         '❄️ December': ['Yangi yil (31 dekabr)'],
     }
 }
+
 
 # Валидация имени (только буквы)
 def validate_name(name):
@@ -204,6 +210,8 @@ async def register_birthday(message: types.Message, state: FSMContext):
                      f"Телефон: {data['phone']}\n" + \
                      f"Дата рождения: {data['birthday']}"
 
+    create_user(data['name'], data['phone'], message.from_user.id, data['birthday'])
+
     await message.answer(finish_message, reply_markup=ReplyKeyboardRemove())
 
     # Кнопки, включая новую кнопку "Настройки"
@@ -220,7 +228,8 @@ async def register_birthday(message: types.Message, state: FSMContext):
 
 class HolidayState(StatesGroup):
     month = State()
-
+    add_holiday = State()
+    add_holiday_date = State()
 
 @router.message(lambda message: message.text == "🎉 Все праздники")
 async def handle_all_holidays(message: types.Message, state: FSMContext):
@@ -272,9 +281,8 @@ async def this_month(message: types.Message, state: FSMContext):
     await message.answer(f"Текущий месяц: {current_month_name}")
 
 
-
-
-@router.message(lambda message: message.text in holidays_by_month['ru'].keys() or message.text in holidays_by_month['uz'].keys())
+@router.message(
+    lambda message: message.text in holidays_by_month['ru'].keys() or message.text in holidays_by_month['uz'].keys())
 async def holidays_in_month(message: types.Message, state: FSMContext):
     user_data = await state.get_data()
     user_lang = user_data.get('language', 'ru')
@@ -293,8 +301,6 @@ async def holidays_in_month(message: types.Message, state: FSMContext):
     await message.answer(f"{texts[user_lang]['holidays_in_month']} {month_name}:\n{holidays_text}")
 
 
-
-
 @router.message(HolidayState.month)
 async def holiday_handler(message: Message, state: FSMContext):
     # Если выбрана кнопка "Назад", возвращаем в основное меню
@@ -305,16 +311,79 @@ async def holiday_handler(message: Message, state: FSMContext):
         kb = [
             [KeyboardButton(text=texts[user_lang]['all_holidays']), KeyboardButton(text=texts[user_lang]['month'])],
             [KeyboardButton(text=texts[user_lang]['add']), KeyboardButton(text=texts[user_lang]['delete'])],
-            [KeyboardButton(text=texts[user_lang]['congratulations']), KeyboardButton(text=texts[user_lang]['settings'])]
+            [KeyboardButton(text=texts[user_lang]['congratulations']),
+             KeyboardButton(text=texts[user_lang]['settings'])]
         ]
         keyboard = ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
 
         await state.clear()
         await message.answer("Выберите действие:", reply_markup=keyboard)
 
+
+
+@router.message(lambda message: message.text == "➕ Добавить")
+async def add_holiday(message: types.Message, state: FSMContext):
+    user_data = await state.get_data()
+    user_lang = user_data.get('language', 'ru')
+
+    # Запросим название праздника
+    await message.answer("Введите название праздника:")
+    await state.set_state(HolidayState.add_holiday)
+
+@router.message(HolidayState.add_holiday)
+async def get_holiday_name(message: types.Message, state: FSMContext):
+    holiday_name = message.text
+
+    # Сохраняем название праздника
+    await state.update_data(holiday_name=holiday_name)
+
+    # Запрашиваем дату
+    await message.answer("Введите дату праздника в формате DD-MM-YYYY:")
+    await state.set_state(HolidayState.add_holiday_date)
+
+
+@router.message(HolidayState.add_holiday_date)
+async def get_holiday_date(message: types.Message, state: FSMContext):
+    holiday_date_str = message.text
+    user_data = await state.get_data()
+    user_lang = user_data.get('language', 'ru')
+    holiday_name = user_data.get('holiday_name')
+    user_id = message.from_user.id  # ID пользователя Telegram
+
+    # Проверка формата даты
+    valid, message_text = validate_birthdate(holiday_date_str)
+    if not valid:
+        await message.answer(message_text)
+        return
+
+    # Сохраняем дату праздника
+    await state.update_data(holiday_date=holiday_date_str)
+
+    # Выводим информацию о празднике
+    await message.answer(f"Праздник добавлен!\n\n"
+                         f"Название праздника: {holiday_name}\n"
+                         f"Дата: {holiday_date_str}")
+
+    # Используем функцию create() для добавления записи в базу
+    create(holiday_name, holiday_date_str, user_id)
+
+    # Возвращаемся в главное меню
+    kb = [
+        [KeyboardButton(text=texts[user_lang]['all_holidays']), KeyboardButton(text=texts[user_lang]['month'])],
+        [KeyboardButton(text=texts[user_lang]['add']), KeyboardButton(text=texts[user_lang]['delete'])],
+        [KeyboardButton(text=texts[user_lang]['congratulations']), KeyboardButton(text=texts[user_lang]['settings'])]
+    ]
+    keyboard = ReplyKeyboardMarkup(keyboard=kb, resize_keyboard=True)
+
+    await state.clear()
+    await message.answer("Выберите действие:", reply_markup=keyboard)
+
+
+
+
 # Запуск процесса поллинга новых апдейтов
 async def main():
-    bot = Bot(token="8081320278:AAENVMKnl4hWbNo7XtEULq07NQuwHVPtIVE")  # Используй свой токен
+    bot = Bot(token="8081320278:AAENVMKnl4hWbNo7XtEULq07NQuwHVPtIVE")
     dp = Dispatcher()
     dp.include_router(router)
 
@@ -323,11 +392,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-
-
-
-
-
 
