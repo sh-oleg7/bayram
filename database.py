@@ -1,63 +1,16 @@
+import os
+
 import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Database connection parameters
-DB_NAME = "bayramtest"
-DB_USER = "postgres"
-DB_PASSWORD = "1688835oleg"
-DB_HOST = "localhost"  # Change if using a remote server
-DB_PORT = "5432"  # Default PostgreSQL port
-
-# Establish connection
-try:
-    conn = psycopg2.connect(
-        dbname=DB_NAME,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        host=DB_HOST,
-        port=DB_PORT
-    )
-    cur = conn.cursor()
-
-    # SQL query to create the users table
-    create_users_table_query = """
-    CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,        -- Auto-incrementing user ID
-    name VARCHAR(100) NOT NULL,    -- User's name
-    phone_number VARCHAR(20),      -- User's phone number
-    telegram_id VARCHAR(50),       -- User's Telegram ID
-    birthday DATE                  -- User's birthday
-    );
-    """
-
-    # SQL query to create the new table with a foreign key
-    create_new_table_query = """
-    CREATE TABLE IF NOT EXISTS new_table (
-        id SERIAL PRIMARY KEY,       -- Auto-incrementing ID
-        name VARCHAR(100) NOT NULL,   -- Name field
-        date DATE NOT NULL,           -- Date field
-        user_id INT,                  -- Foreign key referencing the users table
-        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE -- Foreign key constraint
-    );
-    """
-
-    # Execute the queries
-    cur.execute(create_users_table_query)
-    cur.execute(create_new_table_query)
-
-    # Commit changes
-    conn.commit()
-
-    print("Tables created successfully!")
-
-except Exception as e:
-    print("Error:", e)
-
-finally:
-    # Close the cursor and connection
-    if cur:
-        cur.close()
-    if conn:
-        conn.close()
+DB_NAME = os.getenv("DB_NAME")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST")  # Change if using a remote server
+DB_PORT = os.getenv("DB_PORT")  # Default PostgreSQL port
 
 
 def get_connection():
@@ -76,6 +29,25 @@ def get_connection():
         return None
 
 
+def get_user_id_by_telegram(telegram_id):
+    """Get the user_id by the user's telegram_id"""
+    conn = get_connection()
+    if conn is None:
+        return None
+
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id FROM users WHERE telegram_id = %s;", (telegram_id,))
+        user_id = cur.fetchone()
+        return user_id[0] if user_id else None
+    except Exception as e:
+        print("Error fetching user ID:", e)
+        return None
+    finally:
+        cur.close()
+        conn.close()
+
+
 def create_user(name, phone_number, telegram_id, birthday):
     """Insert a new user into the users table."""
     conn = get_connection()
@@ -92,6 +64,7 @@ def create_user(name, phone_number, telegram_id, birthday):
         user_id = cur.fetchone()[0]  # Get the inserted user's ID
         conn.commit()
         print(f"User created successfully with ID {user_id}")
+        return user_id
     except Exception as e:
         print("Error inserting user:", e)
     finally:
@@ -99,48 +72,59 @@ def create_user(name, phone_number, telegram_id, birthday):
         conn.close()
 
 
-def create_new_record(name, date, user_id):
-    """Insert a new record into the new_table."""
-    conn = get_connection()
-    if conn is None:
-        print("Connection failed")
-        return
+def create_birthday_data(name, date, telegram_id):
+    """Insert a new record into the new_table, using telegram_id"""
+    user_id = get_user_id_by_telegram(telegram_id)
 
-    try:
-        cur = conn.cursor()
+    # If user doesn't exist, create a new one
+    # if not user_id:
+    #     print(f"User with telegram_id {telegram_id} not found. Creating new user...")
+    #     # Example of creating a new user
+    #     user_id = create_user(name="New User", phone_number="0000000000", telegram_id=telegram_id,
+    #                           birthday="2000-01-01")
 
-        # Проверим, что передаваемые данные валидны
-        print(f"Attempting to insert: name={name}, date={date}, user_id={user_id}")
+    if user_id:
+        conn = get_connection()
+        if conn is None:
+            return
 
-        cur.execute(
-            "INSERT INTO new_table (name, date, user_id) "
-            "VALUES (%s, %s, %s) RETURNING id;",
-            (name, date, user_id)
-        )
-        record_id = cur.fetchone()  # Get the inserted record's ID
+        try:
+            cur = conn.cursor()
 
-        if record_id:
-            print(f"Record created successfully with ID {record_id[0]}")
-        else:
-            print("Failed to get record ID after insertion.")
+            # Print attempt details
+            print(f"Attempting to insert: name={name}, date={date}, user_id={user_id}")
 
-        conn.commit()  # Commit changes
-    except Exception as e:
-        print(f"Error inserting record into new_table: {e}")
-    finally:
-        cur.close()
-        conn.close()
+            cur.execute(
+                "INSERT INTO birthday (name, date, user_id) "
+                "VALUES (%s, %s, %s) RETURNING id;",
+                (name, date, user_id)
+            )
+            record_id = cur.fetchone()  # Get the inserted record's ID
 
+            if record_id:
+                print(f"Record created successfully with ID {record_id[0]}")
+            else:
+                print("Failed to get record ID after insertion.")
 
-def create(holiday_name, holiday_date_str, user_id):
-    """Функция для создания записи в таблице."""
-    # Проверяем, что holiday_name и holiday_date_str не пустые
-    if not holiday_name or not holiday_date_str:
-        print("Ошибка: имя праздника или дата не указаны.")
-        return None
+            conn.commit()  # Commit changes
+        except Exception as e:
+            print(f"Error inserting record into new_table: {e}")
+        finally:
+            cur.close()
+            conn.close()
 
-    # Вставляем данные в таблицу через create_new_record
-    create_new_record(holiday_name, holiday_date_str, user_id)
-
-    # Если вставка успешна, возвращаем сообщение об успешной вставке
-    return f"Праздник {holiday_name} успешно добавлен на {holiday_date_str}."
+#
+# create_user(
+#     name="John Doe",
+#     phone_number="1234567890",
+#     telegram_id="123456",
+#     birthday="1990-05-15"  # Example birthday date
+# )
+#
+#
+#
+# create_birthday_data(
+#     name="John's Birthday",
+#     date="2025-02-04",  # Пример даты
+#     telegram_id="123456"  # Пример Telegram ID
+# )
